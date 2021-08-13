@@ -4,55 +4,72 @@ import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
 
 # scene
-scene = pyrender.Scene(bg_color=[0,0,0], ambient_light=[3.0,3.0,3.0])
-r = pyrender.OffscreenRenderer(1920,1080)
+scene = pyrender.Scene(bg_color=[0,0,0], ambient_light=[1.0,1.0,1.0])
+r = pyrender.OffscreenRenderer(640,480)
 
-# camera
-K = np.array([[1081.37,       0,  959.5],
-              [      0, 1081.37,  539.5],
-              [      0,       0,       1]])
-   
+# light
+light = pyrender.SpotLight(color=np.ones(3), intensity=3.0,
+                           innerConeAngle=np.pi/16.0,
+                           outerConeAngle=np.pi/6.0)
+
+scene.add(light,pose=np.identity(4))
+
+# lumbar mesh
+trimesh_lumbar = trimesh.load('dataset_for_task2/SK55M_texturized_bonemesh.ply')
+lumbar_mesh = pyrender.Mesh.from_trimesh(trimesh_lumbar)
+lumbar_node = scene.add(lumbar_mesh)
+
+# tip marker mesh
+sm = trimesh.creation.uv_sphere(radius=0.0075)
+sm.visual.vertex_colors = [1.0, 0.0, 0.0]
+tip_mesh = pyrender.Mesh.from_trimesh(sm)
+tip_node = scene.add(tip_mesh)
+
+######################################################################
+###     To do 1: Setup intirnsic matrix K obtained from task 1     ###
+######################################################################
+
+# camera intrinsic K from task 1
+
+K = np.array([[500.52156682,   0,         320.29761927],
+              [  0,         500.31160744, 239.58855425],
+              [  0,           0,           1        ]])
+
+
+
+
 camera = pyrender.IntrinsicsCamera(fx=K[0,0],fy=K[1,1],cx=K[0,2],cy=K[1,2],znear=0.001,zfar=3)
-scene.add(camera)
+scene.add(camera,pose=np.identity(4))
 
-# mesh
-trimesh_obj = trimesh.load('data_for_task2/turtle/geometry.ply')
-mesh = pyrender.Mesh.from_trimesh(trimesh_obj)
+######################################################################
+###   To do 3: Calculate "lumbar_to_world_camera" pose and         ###
+###            "tip_to_world_camera" pose                          ###
+######################################################################
 
-# mesh pose
-mesh_pose = np.identity(4)
-mesh_pose[:3,:] = np.loadtxt("data_for_task2/000299-color.txt",delimiter=" ")
-print("mesh pose shape: ", mesh_pose.shape)
-##########################################################################
-###   To do : Figure out transform factor between Laval and Pyrender   ###
-##########################################################################
+# lumbar_to_marker_pose
+lumbar_to_marker = np.loadtxt("dataset_for_task2/pose_lumbar/0.txt",delimiter=" ")
+# marker to world pose
+lumbar_marker_to_world_cam = np.loadtxt("dataset_for_task2/pose_phantom/0.txt",delimiter=" ")
 
-####  step 1. figure out transform factor between Pyrender and Laval dataset
-####          and modify the mesh pose 
-####          (hint : See where the turtle located in the RGB image, and
-####                  compare with corresponding translation!)
+###  step 1. calculate "lumbar_to_to_world_cam" pose 
 
-# factor 
-factor = np.array([[1,0,0,0],
-                   [0,1,0,0],
-                   [0,0,1,0],
-                   [0,0,0,1]])
-
-                
-# modify mesh_pose using factor
+lumbar_to_world_cam = np.dot(lumbar_marker_to_world_cam, lumbar_to_marker)
 
 
+scene.set_pose(lumbar_node,pose=lumbar_to_world_cam)
 
-mesh_pose = np.matmul(factor,mesh_pose)
-mesh_node = scene.add(mesh,pose=mesh_pose)
-scene.set_pose(mesh_node,mesh_pose)
 
-#############################################################################
-### To do : augment the rendered obj on the image, ** WITHOUT FOR LOOP ** ###
-#############################################################################
+# tooltip_to_marker_pose
+tooltip_to_marker = np.loadtxt("dataset_for_task2/pose_tooltip/0.txt",delimiter=" ")
+# marker to world pose
+tooltip_marker_to_world_cam = np.loadtxt("dataset_for_task2/pose_tool/0.txt",delimiter=" ")
 
-####  step 1. Generate mask for the object using one of rendered images
-####          (hint : You can directly use conditional statement on numpy array!)
+###  step 1. calculate "tooltip_to_to_world_cam" pose 
+
+
+tooltip_to_world_cam = np.dot(tooltip_to_marker, tooltip_marker_to_world_cam)
+
+scene.set_pose(tip_node,pose=tooltip_to_world_cam)
 
 color,depth = r.render(scene)
 plt.figure()
@@ -62,26 +79,22 @@ plt.subplot(1,2,2)
 plt.imshow(depth)
 plt.show()
 
-# calculate mask **without for loop**.
+# load image
+img = plt.imread("dataset_for_task2/rgb_full/0.png")[:,:,:3]
+
+##############################################################################
+### To do 4 : augment the rendered obj on the image ** WITHOUT FOR LOOP ** ###
+##############################################################################
+
 mask = np.logical_not(depth).astype(float)
-
-
-
-
-####  step 2. Augment the rendred object on the image using mask.
-
-img = plt.imread("data_for_task2/000299-color.png")
-plt.figure()
-plt.imshow(img)
-plt.show()
-
-# mask out image and add rendring **without for loop**
-
-
 color = color/255
-img = img * mask.reshape(1080,1920,-1)
-img = img + color.reshape(1080,1920,-1)
+img_aug = img * mask.reshape(480,640,-1)
+img_aug = img_aug + color.reshape(480,640,-1)
 
 plt.figure()
+plt.subplot(1,2,1)
 plt.imshow(img)
+plt.subplot(1,2,2)
+plt.imshow(img_aug)
 plt.show()
+

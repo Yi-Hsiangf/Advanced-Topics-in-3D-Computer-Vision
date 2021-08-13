@@ -1,203 +1,49 @@
-import pyrender,trimesh
 import numpy as np
-import matplotlib.pyplot as plt
-from scipy.spatial.transform import Rotation as R
+import cv2
+import glob
 
+# code is mainly taken from :
+# https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_calib3d/py_calibration/py_calibration.html 
 
+###########################################################################
+###     To do : Modify the number of grid accordingly to our checker    ###
+###########################################################################
 
-# scene
-scene = pyrender.Scene(bg_color=[0,0,0], ambient_light=[3.0,3.0,3.0])
-r = pyrender.OffscreenRenderer(640,480)
+### hint : opencv's checker is 6*7 while ours is differnt ...
 
-# camera
-K = np.array([[1066.7780,         0, 312.9869],
-              [        0, 1067.4870, 241.3109],
-              [        0,         0,        1]])
-   
-camera = pyrender.IntrinsicsCamera(fx=K[0,0],fy=K[1,1],cx=K[0,2],cy=K[1,2],znear=0.001,zfar=3)
-scene.add(camera)
+# termination criteria
+criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 
-# mesh
-trimesh_obj = trimesh.load('data_for_task1/003_cracker_box/textured.obj')
-mesh = pyrender.Mesh.from_trimesh(trimesh_obj)
-mesh_node = scene.add(mesh)
+# prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,7,0)
+objp = np.zeros((5*8,3), np.float32)
+objp[:,:2] = np.mgrid[0:8,0:5].T.reshape(-1,2)
 
+# Arrays to store object points and image points from all the images.
+objpoints = [] # 3d point in real world space
+imgpoints = [] # 2d points in image plane.
 
-##########################################################################
-###     To do : Find out coordinate system orientation of Pyrender     ###
-##########################################################################
+images = glob.glob('dataset_for_task1/*.png')
 
-####  step 1. Check out the plot. with z = 1m VS -1m
-####          Which direction does Pyrender point for z axis?
+for fname in images:
+    img = cv2.imread(fname)
+    gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
 
-# render positive z
-mesh_pose = np.identity(4)
-mesh_pose[:3,3] = [0,0,2]
-scene.set_pose(mesh_node,mesh_pose)
-color_pos_z,depth = r.render(scene)
+    # Find the chess board corners
+    ret, corners = cv2.findChessboardCorners(gray, (8,5),None)
 
-# render negative z
-mesh_pose = np.identity(4)
-mesh_pose[:3,3] = [0,0,-2]
-scene.set_pose(mesh_node,mesh_pose)
-color_neg_z,depth = r.render(scene)
+    # If found, add object points, image points (after refining them)
+    if ret == True:
+        objpoints.append(objp)
 
-# compare the plot
-plt.figure()
-plt.subplot(1,2,1)
-plt.imshow(color_pos_z)
-plt.subplot(1,2,2)
-plt.imshow(color_neg_z)
-plt.show()
+        corners2 = cv2.cornerSubPix(gray,corners,(11,11),(-1,-1),criteria)
+        imgpoints.append(corners2)
 
-####  step 2. Then place the object in front of the camera (from step 1)
-####          either (0,0,2) or (0,0,-2) depending on the visibility
-####          and test with x,y axis in the similar way to figure out which
-####          direction does Pyrender point for x,y axis
+        # Draw and display the corners
+        img = cv2.drawChessboardCorners(img, (8,5), corners2,ret)
+        cv2.imshow('img',img)
+        cv2.waitKey(1500)
 
-#### Tip : Make sure to set x,y with relatively smaller number (i.e. 0.2)
-####       So that the rendering doesn't go out of image boundary
- 
-# render positive x
-mesh_pose = np.identity(4)
-mesh_pose[:3,3] = [0.2,0,-2] # render positive x
-scene.set_pose(mesh_node,mesh_pose)
-color_pos_x,depth = r.render(scene)
+cv2.destroyAllWindows()
+ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1],None,None)
 
-# render negative x
-mesh_pose = np.identity(4)
-mesh_pose[:3,3] = [-0.2,0,-2]
-scene.set_pose(mesh_node,mesh_pose)
-color_neg_x,depth = r.render(scene)
-
-
-
-# compare the plot. Which direction is x?
-
-plt.figure()
-plt.subplot(1,2,1)
-plt.imshow(color_pos_x)
-plt.subplot(1,2,2)
-plt.imshow(color_neg_x)
-plt.show()
-
-
-# render positive y
-
-mesh_pose = np.identity(4)
-mesh_pose[:3,3] = [0,0.2,-2] # render positive x
-scene.set_pose(mesh_node,mesh_pose)
-color_pos_y,depth = r.render(scene)
-
-
-# render negative y
-
-mesh_pose = np.identity(4)
-mesh_pose[:3,3] = [0,-0.2,-2]
-scene.set_pose(mesh_node,mesh_pose)
-color_neg_y,depth = r.render(scene)
-
-
-# compare the plot. Which direction is y?
-
-plt.figure()
-plt.subplot(1,2,1)
-plt.imshow(color_pos_y)
-plt.subplot(1,2,2)
-plt.imshow(color_neg_y)
-plt.show()
-
-
-####  Now you know the orientation of Pyrender :)
-
-
-##########################################################################
-###  To do : Figure out transform factor between Linemod and Pyrender  ###
-##########################################################################
-# - hint : orientation of YCB dataset is already in the slide
-
-# mesh pose from YCB dataset.
-mesh_pose = np.identity(4)
-mesh_pose[:3,:] = np.loadtxt("data_for_task1/000001-color-0.txt",delimiter=" ")
-
-####  step 1. figure out transform factor between Pyrender and YCB dataset
-####          and modify the mesh pose
-
-color,depth = r.render(scene)
-plt.figure()
-plt.subplot(1,2,1)
-plt.imshow(color)
-plt.subplot(1,2,2)
-plt.imshow(depth)
-plt.show()
-
-# factor
-factor = np.array([[1,0,0,0],
-                   [0,-1,0,0],
-                   [0,0,-1,0],
-                   [0,0,0,1]])
-
-
-# modify mesh_pose using factor
-mesh_pose = np.matmul(factor,mesh_pose)
-scene.set_pose(mesh_node,mesh_pose)
-
-
-
-
-#############################################################################
-### To do : augment the rendered obj on the image, ** WITHOUT FOR LOOP ** ###
-#############################################################################
-
-####  step 1. Generate mask for the object using one of rendered images
-####          (hint : You can directly use conditional statement on numpy array!)
-
-color,depth = r.render(scene)
-plt.figure()
-plt.subplot(1,2,1)
-plt.imshow(color)
-plt.subplot(1,2,2)
-plt.imshow(depth)
-plt.show()
-
-# calculate mask **without for loop**.
-
-mask = np.logical_not(depth).astype(float)
-
-
-####  step 2. Augment the rendred object on the image using mask.
-
-img = plt.imread("data_for_task1/000001-color.png")
-
-plt.figure()
-plt.imshow(img)
-plt.show()
-
-
-# mask out image and add rendring **without for loop**.
-color = color/255
-plt.figure()
-plt.imshow(color)
-plt.show()
-
-print("mask shape: ", mask.shape)
-
-img = img * mask.reshape(480,640,-1)
-print("image shape: ", img.shape)
-print("img: ",img)
-
-plt.figure()
-plt.imshow(img)
-plt.show()
-
-img = img + color.reshape(480,640,-1)
-print("image shape: ", img.shape)
-print("img: ",img)
-
-
-
-plt.figure()
-plt.imshow(img)
-plt.show()
-
-
+print(mtx,ret)
